@@ -80,7 +80,7 @@ def main():
 
     Xtr, ytr, Xva, yva, feat_names = load_splits(processed)
 
-    # Models to try (quick baselines)
+
     models = {
         "logreg": LogisticRegression(max_iter=2000, class_weight="balanced", n_jobs=None, solver="lbfgs"),
         "rf":     RandomForestClassifier(n_estimators=300, max_depth=None, n_jobs=-1, class_weight="balanced")

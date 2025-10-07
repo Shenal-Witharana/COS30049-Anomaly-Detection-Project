@@ -28,7 +28,6 @@ def load_simplified_cicids(raw_dir: Path) -> pd.DataFrame:
     df = pd.read_csv(raw_dir / "basic_data_4.csv")
     df.columns = df.columns.str.strip().str.lower()
 
-    # Expect these columns (check your test output)
     expected = {
         "duration", "protocol_type", "service", "flag",
         "src_bytes", "dst_bytes", "count", "srv_count",
@@ -38,7 +37,7 @@ def load_simplified_cicids(raw_dir: Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
-    # Bring in the mapping (raw attack label -> {dos, probe, r2l, u2r})
+    # raw attack label -> dos, probe, r2l, u2r
     labmap = pd.read_csv(raw_dir / "label_category_map.csv")
     labmap.columns = labmap.columns.str.strip().str.lower()
     raw_col = "raw_label" if "raw_label" in labmap.columns else labmap.columns[0]
@@ -49,7 +48,7 @@ def load_simplified_cicids(raw_dir: Path) -> pd.DataFrame:
 
     df = df.merge(labmap[[raw_col, cat_col]], left_on="label", right_on=raw_col, how="left")
 
-    # Normal rows may not appear in the map → fill them
+    
     df[cat_col] = np.where(
         (df["label"] == "normal") & (df[cat_col].isna()),
         "normal",
@@ -79,7 +78,7 @@ def build_preprocessor(X_train: pd.DataFrame):
     num_cols = ["duration", "src_bytes", "dst_bytes", "count", "srv_count", "serror_rate"]
     cat_cols = ["protocol_type", "service", "flag"]
 
-    # Fall back if any are missing
+    
     num_cols = [c for c in num_cols if c in X_train.columns]
     cat_cols = [c for c in cat_cols if c in X_train.columns]
 
@@ -159,7 +158,7 @@ def main():
     Xva = pre.transform(X_val)
     Xte = pre.transform(X_test)
 
-    # 6) Optional SMOTE (TRAIN only). Only sensible for binary classification.
+    # 6) SMOTE (TRAIN only). 
     if args.smote:
         if label_col != "label_binary":
             raise ValueError("--smote is intended for binary target. Use --target binary.")
@@ -198,7 +197,7 @@ def main():
     }
     joblib.dump({"preprocess": pre, "meta": meta}, models_dir / "scalers_encoders.joblib")
 
-    # 9) Small JSON for quick glance
+    # 9) JSON for quick glance
     with open(out_dir / "prep_stats.json", "w") as f:
         json.dump(meta, f, indent=2)
 
