@@ -75,10 +75,12 @@ def split_stratified(df: pd.DataFrame, label_col: str, seed: int = 42):
 
 def build_preprocessor(X_train: pd.DataFrame):
     """Impute+Scale numeric, Impute+OHE categoricals. Return transformer and column lists."""
-    num_cols = ["duration", "src_bytes", "dst_bytes", "count", "srv_count", "serror_rate"]
-    cat_cols = ["protocol_type", "service", "flag"]
+    num_cols = [
+        "duration","src_bytes","dst_bytes","count","srv_count","serror_rate",
+        "bytes_total","bytes_ratio_src","log_bytes_total","count_per_srv","duration_per_conn"
+    ]
+    cat_cols = ["protocol_type", "service", "service_group", "flag"]
 
-    
     num_cols = [c for c in num_cols if c in X_train.columns]
     cat_cols = [c for c in cat_cols if c in X_train.columns]
 
@@ -101,6 +103,7 @@ def build_preprocessor(X_train: pd.DataFrame):
     return pre, num_cols, cat_cols
 
 
+
 def get_feature_names(pre: ColumnTransformer, num_cols, cat_cols):
     """Recover final feature names after OHE."""
     num_names = list(num_cols)
@@ -108,6 +111,22 @@ def get_feature_names(pre: ColumnTransformer, num_cols, cat_cols):
     cat_names = cat_encoder.get_feature_names_out(cat_cols).tolist() if len(cat_cols) else []
     return num_names + cat_names
 
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
+    d["bytes_total"] = d["src_bytes"].clip(lower=0) + d["dst_bytes"].clip(lower=0)
+    d["bytes_ratio_src"] = d["src_bytes"].clip(lower=0) / (d["bytes_total"] + 1)
+    d["log_bytes_total"] = np.log1p(d["bytes_total"])
+    d["count_per_srv"] = d["count"] / (d["srv_count"] + 1)
+    d["duration_per_conn"] = d["duration"] / (d["count"] + 1)
+    web = {"http","http_443","http_8001","www"}
+    mail = {"smtp","imap4","pop_2","pop_3"}
+    ftp  = {"ftp","ftp_data"}
+    dns  = {"domain","domain_u"}
+    d["service_group"] = np.where(d["service"].isin(web), "web",
+                          np.where(d["service"].isin(mail), "mail",
+                          np.where(d["service"].isin(ftp),  "ftp",
+                          np.where(d["service"].isin(dns),  "dns", "other"))))
+    return d
 
 def main():
     p = argparse.ArgumentParser()
@@ -125,23 +144,30 @@ def main():
     models_dir = Path("models")
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1) Load + label mapping
+    # Load + label mapping
     df = load_simplified_cicids(raw_dir)
 
-    # 2) Choose target
+    # Choose target
     label_col = "label_binary" if args.target == "binary" else "label_5class"
     if label_col not in df.columns:
         raise ValueError(f"Target column '{label_col}' not found.")
 
-    # 3) Split (stratified)
+    # Split (stratified)
     train_df, val_df, test_df = split_stratified(df, label_col=label_col, seed=args.seed)
 
-    # 4) Separate X/y
+    train_df = engineer_features(train_df)
+    val_df   = engineer_features(val_df)
+    test_df  = engineer_features(test_df)
+
+
+    # Separate X/y
     feature_cols = [
-        "duration", "protocol_type", "service", "flag",
-        "src_bytes", "dst_bytes", "count", "srv_count", "serror_rate"
+        "duration", "protocol_type", "service", "service_group", "flag",
+        "src_bytes", "dst_bytes", "count", "srv_count", "serror_rate",
+        "bytes_total","bytes_ratio_src","log_bytes_total","count_per_srv","duration_per_conn"
     ]
     feature_cols = [c for c in feature_cols if c in df.columns]
+    assert len(feature_cols) > 0, "No feature columns found after engineering."
 
     X_train = train_df[feature_cols].copy()
     y_train = train_df[label_col].copy()
@@ -152,13 +178,13 @@ def main():
     X_test  = test_df[feature_cols].copy()
     y_test  = test_df[label_col].copy()
 
-    # 5) Preprocess (fit on TRAIN only)
+    # Preprocess
     pre, num_cols, cat_cols = build_preprocessor(X_train)
     Xtr = pre.fit_transform(X_train)
     Xva = pre.transform(X_val)
     Xte = pre.transform(X_test)
 
-    # 6) SMOTE (TRAIN only). 
+    # SMOTE 
     if args.smote:
         if label_col != "label_binary":
             raise ValueError("--smote is intended for binary target. Use --target binary.")
@@ -167,7 +193,7 @@ def main():
         sm = SMOTE(random_state=args.seed)
         Xtr, y_train = sm.fit_resample(Xtr, y_train)
 
-    # 7) Save processed CSVs (feature names + label)
+    # Save processed CSVs
     feat_names = get_feature_names(pre, num_cols, cat_cols)
     train_out = pd.DataFrame(Xtr, columns=feat_names)
     val_out   = pd.DataFrame(Xva, columns=feat_names)
@@ -181,7 +207,7 @@ def main():
     val_out.to_csv(out_dir / "val.csv", index=False)
     test_out.to_csv(out_dir / "test.csv", index=False)
 
-    # 8) Save preprocessing artifact + meta
+    # Save preprocessing artifact
     meta = {
         "target_mode": args.target,
         "feature_cols": feature_cols,
@@ -197,7 +223,7 @@ def main():
     }
     joblib.dump({"preprocess": pre, "meta": meta}, models_dir / "scalers_encoders.joblib")
 
-    # 9) JSON for quick glance
+    # JSON for quick glance
     with open(out_dir / "prep_stats.json", "w") as f:
         json.dump(meta, f, indent=2)
 
