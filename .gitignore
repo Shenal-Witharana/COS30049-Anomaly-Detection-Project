@@ -21,8 +21,7 @@ notebooks/**/*.pdf
 # Data (keep heavy data local; submit via Canvas ZIP)
 data/raw/
 data/processed/
-!data/processed/sample_*.csv  # allow tiny sample(s) if needed
-
+!data/processed/sample_*.csv  
 # Models (binary)
 models/
 *.joblib
